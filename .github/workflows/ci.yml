@@ -1,0 +1,45 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_USER: slurmscope, POSTGRES_PASSWORD: test, POSTGRES_DB: slurmscope_test}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U slurmscope -d slurmscope_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run: {working-directory: backend}
+    env:
+      DATABASE_URL: postgresql+psycopg://slurmscope:test@localhost:5432/slurmscope_test
+      ARTIFACT_ROOT: /tmp/slurmscope-artifacts
+      SLURM_ENABLED: "true"
+      SLURM_PARTITIONS: debug,batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: uv sync --extra dev
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run mypy src
+      - run: uv run alembic upgrade head
+      - run: uv run pytest -q
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run: {working-directory: frontend}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json}
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build

@@ -1,0 +1,63 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-slurmscope}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-slurmscope}
+      POSTGRES_DB: ${POSTGRES_DB:-slurmscope}
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-slurmscope} -d ${POSTGRES_DB:-slurmscope}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  migrate:
+    build: .
+    command: ["alembic", "-c", "alembic.ini", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-slurmscope}:${POSTGRES_PASSWORD:-slurmscope}@db:5432/${POSTGRES_DB:-slurmscope}
+    depends_on:
+      db: {condition: service_healthy}
+    restart: "no"
+  api:
+    build: .
+    command: ["uvicorn", "slurmscope.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-slurmscope}:${POSTGRES_PASSWORD:-slurmscope}@db:5432/${POSTGRES_DB:-slurmscope}
+      ARTIFACT_ROOT: /data/artifacts
+      SLURM_ENABLED: ${SLURM_ENABLED:-false}
+      SLURM_ACCOUNT: ${SLURM_ACCOUNT:-}
+      SLURM_PARTITIONS: ${SLURM_PARTITIONS:-}
+    volumes: ["artifacts:/data/artifacts"]
+    ports: ["127.0.0.1:${API_PORT:-8000}:8000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/ready')"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+  worker:
+    build: .
+    command: ["python", "-m", "slurmscope.worker.runner"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-slurmscope}:${POSTGRES_PASSWORD:-slurmscope}@db:5432/${POSTGRES_DB:-slurmscope}
+      ARTIFACT_ROOT: /data/artifacts
+      WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-10}
+      MAX_LOCAL_JOBS: ${MAX_LOCAL_JOBS:-2}
+      SLURM_ENABLED: ${SLURM_ENABLED:-false}
+      SLURM_ACCOUNT: ${SLURM_ACCOUNT:-}
+      SLURM_PARTITIONS: ${SLURM_PARTITIONS:-}
+    volumes: ["artifacts:/data/artifacts"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    restart: unless-stopped
+  frontend:
+    build: ./frontend
+    ports: ["127.0.0.1:${FRONTEND_PORT:-5173}:5173"]
+    environment:
+      VITE_API_URL: http://localhost:${API_PORT:-8000}
+    depends_on: [api]
+volumes:
+  postgres_data:
+  artifacts:

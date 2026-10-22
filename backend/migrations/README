@@ -1,0 +1,2 @@
+Alembic revisions live in versions/. Deployments run `alembic upgrade head` before
+starting the API or worker. PostgreSQL is the authoritative run store.

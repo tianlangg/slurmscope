@@ -1,0 +1,1 @@
+"""Server approved workload templates."""
